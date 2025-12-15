@@ -51,6 +51,8 @@ from torch.utils.data import DataLoader, Dataset, random_split, Subset
 from torchvision.models.video.resnet import BasicBlock, R2Plus1dStem, Conv2Plus1D
 from tqdm import tqdm
 from sklearn.metrics import precision_recall_fscore_support, confusion_matrix
+from pathlib import Path
+from sklearn.manifold import TSNE
 
 
 # CLASS_NAMES will be auto-detected based on available directories
@@ -515,13 +517,15 @@ def evaluate(
     loader: DataLoader,
     criterion: nn.Module,
     device: torch.device,
-) -> Tuple[float, float, List[int], List[int]]:
+    collect_features: bool = False,
+) -> Tuple[float, float, List[int], List[int], torch.Tensor | None]:
     model.eval()
     total_loss = 0.0
     total_correct = 0
     total_samples = 0
     all_preds = []
     all_targets = []
+    feature_chunks = []
 
     pbar = tqdm(loader, desc="Validation", leave=False)
     with torch.no_grad():
@@ -540,6 +544,8 @@ def evaluate(
             # Collect predictions and targets for metrics
             all_preds.extend(preds.cpu().numpy().tolist())
             all_targets.extend(targets.cpu().numpy().tolist())
+            if collect_features:
+                feature_chunks.append(outputs.detach().cpu())
             
             # Update progress bar with current metrics
             current_loss = total_loss / total_samples
@@ -548,7 +554,8 @@ def evaluate(
 
     avg_loss = total_loss / total_samples
     accuracy = total_correct / total_samples
-    return avg_loss, accuracy, all_preds, all_targets
+    features = torch.cat(feature_chunks, dim=0) if feature_chunks else None
+    return avg_loss, accuracy, all_preds, all_targets, features
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -559,13 +566,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--data-dir",
         type=str,
-        default="/home/prml/RIMA/datasets/ADNI",
+        default="datasets/ADNI",
         help="Root directory containing AD_MRI_130_FIN, CN_MRI_229_FIN, and MCI_MRI_86_FIN folders.",
     )
-    parser.add_argument("--epochs", type=int, default=30, help="Number of training epochs.")
-    parser.add_argument("--batch-size", type=int, default=2, help="Batch size.")
+    parser.add_argument("--epochs", type=int, default=200, help="Number of training epochs.")
+    parser.add_argument("--batch-size", type=int, default=4, help="Batch size.")
     parser.add_argument("--num-workers", type=int, default=2, help="DataLoader workers.")
-    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate.")
+    parser.add_argument("--lr", type=float, default=2e-5, help="Learning rate.")
     parser.add_argument(
         "--val-fraction",
         type=float,
@@ -629,6 +636,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Balance dataset by randomly sampling majority classes to match minority class count.",
     )
+    parser.add_argument(
+        "--modality",
+        type=str,
+        choices=["auto", "mri", "pet"],
+        default="auto",
+        help="Force MRI or PET directories instead of auto-detection.",
+    )
     return parser.parse_args(argv)
 
 
@@ -691,6 +705,10 @@ def save_confusion_matrix(
 def main() -> None:
     args = parse_args()
     set_seed(args.seed)
+    repo_root = Path(__file__).resolve().parent
+    args.data_dir = str((repo_root / args.data_dir).resolve())
+    if args.load_patient_ids:
+        args.load_patient_ids = str((repo_root / args.load_patient_ids).resolve())
 
     # Create save directory
     os.makedirs(args.save_path, exist_ok=True)
@@ -699,8 +717,15 @@ def main() -> None:
 
     device = torch.device(args.device)
 
-    # Auto-detect MRI or PET dataset
-    class_names = detect_class_names(args.data_dir)
+    # Auto-detect MRI or PET dataset unless overridden
+    if args.modality == "mri":
+        print("Forcing MRI modality.")
+        class_names = CLASS_NAMES_MRI
+    elif args.modality == "pet":
+        print("Forcing PET modality.")
+        class_names = CLASS_NAMES_PET
+    else:
+        class_names = detect_class_names(args.data_dir)
 
     # Filter classes if specified
     if args.classes:
@@ -724,7 +749,8 @@ def main() -> None:
 
     # Load patient IDs if specified
     patient_ids_filter = None
-    fixed_split = False
+    fixed_split_mode: str | None = None  # "ids" or "paths"
+    fixed_split_entries = None
     train_ids_filter = None
     val_ids_filter = None
 
@@ -735,32 +761,34 @@ def main() -> None:
         
         # Check if this is a fixed split file
         if "train" in loaded_ids and "val" in loaded_ids:
-            print("Detected fixed train/val split in JSON file.")
-            fixed_split = True
-            
-            # Helper to map IDs for a specific split
-            def map_ids(source_ids, class_names):
-                mapped_filter = {}
-                for class_dir in class_names.keys():
-                    if class_dir in source_ids:
-                        mapped_filter[class_dir] = source_ids[class_dir]
-                    else:
-                        # Try mapping
-                        prefix = class_dir.split('_')[0]
-                        mapped_key = None
-                        for key in source_ids.keys():
-                            if key.startswith(prefix + "_"):
-                                mapped_key = key
-                                break
-                        if mapped_key:
-                            mapped_filter[class_dir] = source_ids[mapped_key]
+            sample_train = loaded_ids["train"]
+            if sample_train and isinstance(sample_train[0], dict) and "mri_path" in sample_train[0]:
+                print("Detected fixed file-path split.")
+                fixed_split_mode = "paths"
+                fixed_split_entries = loaded_ids
+            else:
+                print("Detected fixed patient-id split.")
+                fixed_split_mode = "ids"
+                def map_ids(source_ids, class_names):
+                    mapped_filter = {}
+                    for class_dir in class_names.keys():
+                        if class_dir in source_ids:
+                            mapped_filter[class_dir] = source_ids[class_dir]
                         else:
-                            mapped_filter[class_dir] = []
-                return mapped_filter
+                            prefix = class_dir.split('_')[0]
+                            mapped_key = None
+                            for key in source_ids.keys():
+                                if key.startswith(prefix + "_"):
+                                    mapped_key = key
+                                    break
+                            if mapped_key:
+                                mapped_filter[class_dir] = source_ids[mapped_key]
+                            else:
+                                mapped_filter[class_dir] = []
+                    return mapped_filter
 
-            train_ids_filter = map_ids(loaded_ids["train"], class_names)
-            val_ids_filter = map_ids(loaded_ids["val"], class_names)
-            
+                train_ids_filter = map_ids(loaded_ids["train"], class_names)
+                val_ids_filter = map_ids(loaded_ids["val"], class_names)
         else:
             # Handle cross-modality mapping (MRI <-> PET) for flat list
             patient_ids_filter = {}
@@ -787,7 +815,7 @@ def main() -> None:
                         patient_ids_filter[class_dir] = []
             print(f"Loaded patient IDs for {len(patient_ids_filter)} classes")
 
-    if fixed_split:
+    if fixed_split_mode == "ids":
         print("Constructing Train and Validation datasets from fixed split...")
         train_dataset = NiftiDataset(
             root_dir=args.data_dir,
@@ -819,25 +847,43 @@ def main() -> None:
             target_shape=tuple(args.target_shape),
             class_names=class_names,
             augment=args.augment,
-            max_samples_per_class=args.max_samples_per_class,
-            patient_ids_filter=patient_ids_filter,
+            max_samples_per_class=None if fixed_split_mode == "paths" else args.max_samples_per_class,
+            patient_ids_filter=None if fixed_split_mode == "paths" else patient_ids_filter,
             balance_to_minority=args.balance_to_minority,
             seed=args.seed,
         )
         
-        # Save patient IDs used
-        patient_ids_file = os.path.join(args.save_path, "patient_ids.json")
-        with open(patient_ids_file, 'w') as f:
-            json.dump(full_dataset.patient_ids_used, f, indent=2)
-        print(f"Saved patient IDs to {patient_ids_file}")
-        
-        # Print sample counts per class
-        print("\nSamples per class:")
-        for class_name in class_names.keys():
-            count = len(full_dataset.patient_ids_used[class_name])
-            print(f"  {class_name}: {count} patients")
-        print(f"Total samples: {len(full_dataset)}\n")
-        train_dataset, val_dataset = split_dataset(full_dataset, args.val_fraction, args.seed)
+        if fixed_split_mode == "paths":
+            path_key = "mri_path" if args.modality != "pet" else "pet_path"
+            path_to_index = {str(Path(path).resolve()): idx for idx, (path, _) in enumerate(full_dataset.samples)}
+
+            def indices_from_entries(entries):
+                indices = []
+                for entry in entries:
+                    candidate = str((repo_root / entry[path_key]).resolve())
+                    if candidate not in path_to_index:
+                        raise ValueError(f"Path {candidate} not found in dataset.")
+                    indices.append(path_to_index[candidate])
+                return indices
+
+            train_idx = indices_from_entries(fixed_split_entries["train"])
+            val_idx = indices_from_entries(fixed_split_entries["val"])
+            train_dataset = Subset(full_dataset, train_idx)
+            val_dataset = Subset(full_dataset, val_idx)
+        else:
+            # Save patient IDs used
+            patient_ids_file = os.path.join(args.save_path, "patient_ids.json")
+            with open(patient_ids_file, 'w') as f:
+                json.dump(full_dataset.patient_ids_used, f, indent=2)
+            print(f"Saved patient IDs to {patient_ids_file}")
+            
+            # Print sample counts per class
+            print("\nSamples per class:")
+            for class_name in class_names.keys():
+                count = len(full_dataset.patient_ids_used[class_name])
+                print(f"  {class_name}: {count} patients")
+            print(f"Total samples: {len(full_dataset)}\n")
+            train_dataset, val_dataset = split_dataset(full_dataset, args.val_fraction, args.seed)
 
     # Verify split balance
     print("\nVerifying split balance:")
@@ -883,7 +929,8 @@ def main() -> None:
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
-    best_val_loss = float('inf')  # Track best validation loss (lower is better)
+    best_val_loss = float('inf')
+    best_summary = None
     
     # Open results file
     with open(results_file, "w") as f:
@@ -905,7 +952,9 @@ def main() -> None:
 
     for epoch in range(1, args.epochs + 1):
         train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, device)
-        val_loss, val_acc, val_preds, val_targets = evaluate(model, val_loader, criterion, device)
+        val_loss, val_acc, val_preds, val_targets, _ = evaluate(
+            model, val_loader, criterion, device
+        )
         
         # Calculate additional metrics
         metrics = calculate_metrics(val_targets, val_preds, len(class_names))
@@ -927,13 +976,20 @@ def main() -> None:
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
+            best_summary = {
+                "epoch": epoch,
+                "val_loss": val_loss,
+                "val_acc": val_acc,
+                "precision": metrics["precision"],
+                "recall": metrics["recall"],
+                "f1": metrics["f1"],
+                "specificity": metrics["specificity"],
+            }
             torch.save(
                 {
+                    **best_summary,
                     "model_state_dict": model.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
-                    "epoch": epoch,
-                    "val_loss": val_loss,
-                    "val_acc": val_acc,
                     "metrics": metrics,
                     "args": vars(args),
                 },
@@ -945,6 +1001,15 @@ def main() -> None:
     with open(results_file, "a") as f:
         f.write("\n" + "=" * 80 + "\n")
         f.write(f"Best Validation Loss: {best_val_loss:.4f}\n")
+        if best_summary:
+            f.write(
+                f"Best Epoch: {best_summary['epoch']} "
+                f"Acc: {best_summary['val_acc']:.4f} "
+                f"Precision: {best_summary['precision']:.4f} "
+                f"Recall: {best_summary['recall']:.4f} "
+                f"F1: {best_summary['f1']:.4f} "
+                f"Specificity: {best_summary['specificity']:.4f}\n"
+            )
         f.write(f"Best model saved to: {model_path}\n")
 
     # Load best model and generate confusion matrix
@@ -952,10 +1017,34 @@ def main() -> None:
     checkpoint = torch.load(model_path)
     model.load_state_dict(checkpoint["model_state_dict"])
     
-    _, _, val_preds, val_targets = evaluate(model, val_loader, criterion, device)
+    _, _, val_preds, val_targets, features = evaluate(
+        model, val_loader, criterion, device, collect_features=True
+    )
     cm_path = os.path.join(args.save_path, "confusion_matrix.png")
     save_confusion_matrix(val_targets, val_preds, class_names, cm_path)
     print(f"Saved confusion matrix to {cm_path}")
+
+    if features is not None:
+        print("Generating t-SNE plot for validation embeddings...")
+        tsne = TSNE(n_components=2, random_state=42)
+        tsne_coords = tsne.fit_transform(features.numpy())
+        plt.figure(figsize=(8, 6))
+        scatter = plt.scatter(
+            tsne_coords[:, 0],
+            tsne_coords[:, 1],
+            c=val_targets,
+            cmap="coolwarm",
+            alpha=0.7,
+        )
+        plt.title("t-SNE of Validation Predictions (Best 3D ResNet)")
+        plt.xlabel("Dim 1")
+        plt.ylabel("Dim 2")
+        plt.colorbar(scatter, ticks=sorted(class_names.values()))
+        tsne_path = os.path.join(args.save_path, "tsne_best_val.png")
+        plt.tight_layout()
+        plt.savefig(tsne_path)
+        plt.close()
+        print(f"Saved t-SNE plot to {tsne_path}")
 
 
 if __name__ == "__main__":
